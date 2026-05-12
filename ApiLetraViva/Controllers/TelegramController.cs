@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using ApiLetraViva.Services;
+using Microsoft.AspNetCore.Mvc;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 
@@ -6,13 +7,19 @@ namespace ApiLetraViva.Controllers
 {
     [ApiController]
     [Route("webhook/telegram")]
-    public class TelegramController : Controller
+    public class TelegramController : ControllerBase
     {
-        private readonly IConfiguration _configuration;
+        private readonly TelegramService _telegramService;
 
-        public TelegramController(IConfiguration configuration)
+        private readonly AIService _aiService;
+
+        public TelegramController(
+            TelegramService telegramService,
+            AIService aiService)
         {
-            _configuration = configuration;
+            _telegramService = telegramService;
+
+            _aiService = aiService;
         }
 
         [HttpPost]
@@ -23,20 +30,15 @@ namespace ApiLetraViva.Controllers
                 if (update.Message is null)
                     return Ok();
 
-                var message = update.Message.Text;
+                var userMessage = update.Message.Text;
 
                 var chatId = update.Message.Chat.Id;
 
-                Console.WriteLine($"Mensaje recibido: {message}");
+                Console.WriteLine($"Mensaje recibido: {userMessage}");
 
-                var token = _configuration["TELEGRAM_BOT_TOKEN"];
+                var response = await _aiService.GetResponse(userMessage!);
 
-                var botClient = new TelegramBotClient(token!);
-
-                object value = await botClient.SendMessage(
-                    chatId: chatId,
-                    text: $"Recibí tu mensaje: {message} 🎶"
-                );
+                await _telegramService.SendMessage(chatId, response);
 
                 return Ok();
             }

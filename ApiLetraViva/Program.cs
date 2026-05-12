@@ -1,4 +1,5 @@
 using ApiLetraViva.Context;
+using ApiLetraViva.Services;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -9,6 +10,10 @@ var connectionString =
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(connectionString));
+
+builder.Services.AddScoped<TelegramService>();
+
+builder.Services.AddScoped<AIService>();
 
 builder.Services.AddControllers();
 
