@@ -1,0 +1,18 @@
+[
+  {
+    "ContainingType": "ApiLetraViva.Controllers.TelegramController",
+    "Method": "Receive",
+    "RelativePath": "webhook/telegram",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "update",
+        "Type": "Telegram.Bot.Types.Update",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  }
+]

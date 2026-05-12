@@ -1,0 +1,6 @@
+@ApiLetraViva_HostAddress = http://localhost:5031
+
+GET {{ApiLetraViva_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
