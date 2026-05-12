@@ -7,9 +7,11 @@ var builder = WebApplication.CreateBuilder(args);
 // Obtener connection string y convertir formato URI a formato Npgsql si es necesario
 var rawConnectionString =
     Environment.GetEnvironmentVariable("DATABASE_URL")
-    ?? builder.Configuration.GetConnectionString("DefaultConnection");
+    ?? builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException(
+        "No se encontró la connection string. Define DATABASE_URL como variable de entorno en Railway.");
 
-var connectionString = ConvertToNpgsqlFormat(rawConnectionString!);
+var connectionString = ConvertToNpgsqlFormat(rawConnectionString);
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(connectionString));
