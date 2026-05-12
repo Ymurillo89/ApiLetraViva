@@ -14,6 +14,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddScoped<TelegramService>();
 
 builder.Services.AddScoped<AIService>();
+builder.Services.AddScoped<ConversationService>();
 
 builder.Services.AddControllers();
 

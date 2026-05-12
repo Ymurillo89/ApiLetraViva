@@ -11,15 +11,20 @@ namespace ApiLetraViva.Controllers
     {
         private readonly TelegramService _telegramService;
 
+        private readonly ConversationService _conversationService;
+
         private readonly AIService _aiService;
 
         public TelegramController(
             TelegramService telegramService,
-            AIService aiService)
+            AIService aiService,
+            ConversationService conversationService)
         {
             _telegramService = telegramService;
 
             _aiService = aiService;
+
+            _conversationService = conversationService;
         }
 
         [HttpPost]
@@ -30,24 +35,84 @@ namespace ApiLetraViva.Controllers
                 if (update.Message is null)
                     return Ok();
 
+                if (string.IsNullOrWhiteSpace(update.Message.Text))
+                    return Ok();
+
                 var userMessage = update.Message.Text;
 
                 var chatId = update.Message.Chat.Id;
 
+                var customerName = update.Message.Chat.FirstName;
+
                 Console.WriteLine($"Mensaje recibido: {userMessage}");
 
-                var response = await _aiService.GetResponse(userMessage!);
+                // =========================
+                // CLIENTE
+                // =========================
 
-                await _telegramService.SendMessage(chatId, response);
+                var customer =
+                    await _conversationService
+                    .GetOrCreateCustomer(
+                        chatId,
+                        customerName
+                    );
+
+                // =========================
+                // CONVERSACIÓN
+                // =========================
+
+                var conversation =
+                    await _conversationService
+                    .GetOrCreateConversation(
+                        customer.Id
+                    );
+
+                // =========================
+                // GUARDAR MENSAJE USUARIO
+                // =========================
+
+                await _conversationService
+                    .SaveMessage(
+                        conversation.Id,
+                        "user",
+                        userMessage
+                    );
+
+                // =========================
+                // RESPUESTA IA
+                // =========================
+
+                var response =
+                    await _aiService
+                    .GetResponse(userMessage);
+
+                // =========================
+                // GUARDAR RESPUESTA IA
+                // =========================
+
+                await _conversationService
+                    .SaveMessage(
+                        conversation.Id,
+                        "assistant",
+                        response
+                    );
+
+                // =========================
+                // RESPONDER TELEGRAM
+                // =========================
+
+                await _telegramService
+                    .SendMessage(chatId, response);
 
                 return Ok();
             }
             catch (Exception ex)
             {
-                Console.WriteLine(ex.Message);
+                Console.WriteLine(ex);
 
                 return Ok();
             }
         }
     }
 }
+

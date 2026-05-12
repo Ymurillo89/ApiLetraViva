@@ -15,5 +15,6 @@ namespace ApiLetraViva.Models
         public string? Context { get; set; }
 
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+        public ICollection<Message> Messages { get; set; } = new List<Message>();
     }
 }
