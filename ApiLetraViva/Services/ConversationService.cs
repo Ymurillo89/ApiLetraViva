@@ -1,4 +1,5 @@
 ﻿using ApiLetraViva.Context;
+using ApiLetraViva.Enums;
 using ApiLetraViva.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -75,6 +76,33 @@ namespace ApiLetraViva.Services
             _context.Messages.Add(message);
 
             await _context.SaveChangesAsync();
+        }
+
+        public async Task<List<Message>> GetRecentMessages(
+            Guid conversationId,
+            int count = 10)
+        {
+            return await _context.Messages
+                .Where(m => m.ConversationId == conversationId)
+                .OrderByDescending(m => m.CreatedAt)
+                .Take(count)
+                .OrderBy(m => m.CreatedAt)
+                .ToListAsync();
+        }
+
+        public async Task UpdateConversationState(
+            Guid conversationId,
+            ConversationState state)
+        {
+            var conversation = await _context.Conversations
+                .FirstOrDefaultAsync(c => c.Id == conversationId);
+
+            if (conversation is not null)
+            {
+                conversation.State = state;
+                conversation.UpdatedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+            }
         }
     }
 }

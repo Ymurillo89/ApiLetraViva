@@ -1,6 +1,5 @@
 ﻿using ApiLetraViva.Services;
 using Microsoft.AspNetCore.Mvc;
-using Telegram.Bot;
 using Telegram.Bot.Types;
 
 namespace ApiLetraViva.Controllers
@@ -10,21 +9,20 @@ namespace ApiLetraViva.Controllers
     public class TelegramController : ControllerBase
     {
         private readonly TelegramService _telegramService;
-
         private readonly ConversationService _conversationService;
-
         private readonly AIService _aiService;
+        private readonly ILogger<TelegramController> _logger;
 
         public TelegramController(
             TelegramService telegramService,
             AIService aiService,
-            ConversationService conversationService)
+            ConversationService conversationService,
+            ILogger<TelegramController> logger)
         {
             _telegramService = telegramService;
-
             _aiService = aiService;
-
             _conversationService = conversationService;
+            _logger = logger;
         }
 
         [HttpPost]
@@ -35,13 +33,13 @@ namespace ApiLetraViva.Controllers
             {
                 if (update.Message is null)
                 {
-                    Console.WriteLine("⚠️ Update sin mensaje, ignorando.");
+                    _logger.LogWarning("Update sin mensaje, ignorando.");
                     return Ok();
                 }
 
                 if (string.IsNullOrWhiteSpace(update.Message.Text))
                 {
-                    Console.WriteLine("⚠️ Mensaje sin texto, ignorando.");
+                    _logger.LogWarning("Mensaje sin texto, ignorando.");
                     return Ok();
                 }
 
@@ -49,47 +47,41 @@ namespace ApiLetraViva.Controllers
                 chatId = update.Message.Chat.Id;
                 var customerName = update.Message.Chat.FirstName;
 
-                Console.WriteLine($"📩 Mensaje recibido | ChatId: {chatId} | Texto: {userMessage}");
-
                 // CLIENTE
-                Console.WriteLine("🔍 Buscando o creando cliente...");
                 var customer = await _conversationService.GetOrCreateCustomer(chatId, customerName);
-                Console.WriteLine($"✅ Cliente OK | Id: {customer.Id}");
 
                 // CONVERSACIÓN
-                Console.WriteLine("🔍 Buscando o creando conversación...");
                 var conversation = await _conversationService.GetOrCreateConversation(customer.Id);
-                Console.WriteLine($"✅ Conversación OK | Id: {conversation.Id}");
+
+                _logger.LogInformation(
+                    "Webhook recibido | ChatId: {ChatId} | State: {State} | Message: {Message}",
+                    chatId, conversation.State, userMessage);
 
                 // GUARDAR MENSAJE USUARIO
-                Console.WriteLine("💾 Guardando mensaje del usuario...");
                 await _conversationService.SaveMessage(conversation.Id, "user", userMessage);
-                Console.WriteLine("✅ Mensaje del usuario guardado.");
 
-                // RESPUESTA IA
-                var response = await _aiService.GetResponse(userMessage);
+                // OBTENER HISTORIAL RECIENTE
+                var history = await _conversationService.GetRecentMessages(conversation.Id, count: 10);
+
+                // RESPUESTA IA (con historial y estado actual)
+                var response = await _aiService.GetResponse(userMessage, history, conversation.State);
 
                 // GUARDAR RESPUESTA IA
-                Console.WriteLine("💾 Guardando respuesta del asistente...");
                 await _conversationService.SaveMessage(conversation.Id, "assistant", response);
-                Console.WriteLine("✅ Respuesta del asistente guardada.");
 
                 // RESPONDER TELEGRAM
                 await _telegramService.SendMessage(chatId, response);
-                Console.WriteLine("📤 Respuesta enviada a Telegram.");
 
                 return Ok();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ ERROR | ChatId: {chatId} | Tipo: {ex.GetType().Name} | Mensaje: {ex.Message}");
-                Console.WriteLine($"❌ StackTrace: {ex.StackTrace}");
-                if (ex.InnerException != null)
-                    Console.WriteLine($"❌ InnerException: {ex.InnerException.Message}");
+                _logger.LogError(ex,
+                    "Error procesando webhook | ChatId: {ChatId} | Tipo: {ExType}",
+                    chatId, ex.GetType().Name);
 
                 return Ok();
             }
         }
     }
 }
-

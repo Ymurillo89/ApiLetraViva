@@ -36,6 +36,7 @@ coverage*/
 logs/
 
 # Secrets
+appsettings.json
 appsettings.Development.json
 appsettings.Local.json
 appsettings.Production.json
