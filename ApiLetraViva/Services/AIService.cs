@@ -82,21 +82,10 @@ namespace ApiLetraViva.Services
                     systemInstruction: new Content(SystemPrompt)
                 );
 
-                var chat = model.StartChat();
+                // Construir el prompt incluyendo el historial como contexto
+                var fullPrompt = BuildPromptWithHistory(userMessage, history, currentState);
 
-                // Reconstruir historial de mensajes previos (excluyendo el mensaje actual)
-                foreach (var msg in history)
-                {
-                    var role = msg.Role == "user" ? "user" : "model";
-                    chat.History.Add(new ContentResponse(role, msg.Content));
-                }
-
-                // Agregar contexto del estado actual si es relevante
-                var contextualMessage = currentState != ConversationState.Idle
-                    ? $"[Estado actual: {GetStateDescription(currentState)}]\n\n{userMessage}"
-                    : userMessage;
-
-                var response = await chat.SendMessage(contextualMessage);
+                var response = await model.GenerateContent(fullPrompt);
 
                 return response.Text ?? "No pude generar una respuesta. ¿Puedes repetir tu mensaje? 😊";
             }
@@ -105,6 +94,31 @@ namespace ApiLetraViva.Services
                 _logger.LogError(ex, "Error al llamar a la API de Gemini");
                 return "Ups, tuve un problema técnico 😅 ¿Puedes intentarlo de nuevo en un momento?";
             }
+        }
+
+        private static string BuildPromptWithHistory(
+            string userMessage,
+            IReadOnlyList<ConversationMessage> history,
+            ConversationState currentState)
+        {
+            var sb = new System.Text.StringBuilder();
+
+            if (currentState != ConversationState.Idle)
+                sb.AppendLine($"[Estado actual de la conversación: {GetStateDescription(currentState)}]\n");
+
+            if (history.Count > 0)
+            {
+                sb.AppendLine("Historial de la conversación:");
+                foreach (var msg in history)
+                {
+                    var label = msg.Role == "user" ? "Cliente" : "Celeste";
+                    sb.AppendLine($"{label}: {msg.Content}");
+                }
+                sb.AppendLine();
+            }
+
+            sb.Append($"Cliente: {userMessage}");
+            return sb.ToString();
         }
 
         private static string GetStateDescription(ConversationState state) => state switch
