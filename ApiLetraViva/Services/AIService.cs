@@ -87,7 +87,7 @@ namespace ApiLetraViva.Services
                 // Reconstruir historial de mensajes previos (excluyendo el mensaje actual)
                 foreach (var msg in history)
                 {
-                    var role = msg.Role == "user" ? Role.User.ToString() : Role.Model.ToString();
+                    var role = msg.Role == "user" ? "user" : "model";
                     chat.History.Add(new ContentResponse(role, msg.Content));
                 }
 
