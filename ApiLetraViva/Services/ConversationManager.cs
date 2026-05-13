@@ -11,6 +11,7 @@ namespace ApiLetraViva.Services
         private readonly AIService _aiService;
         private readonly OrderService _orderService;
         private readonly TelegramService _telegramService;
+        private readonly EmailService _emailService;
         private readonly ILogger<ConversationManager> _logger;
 
         public ConversationManager(
@@ -18,12 +19,14 @@ namespace ApiLetraViva.Services
             AIService aiService,
             OrderService orderService,
             TelegramService telegramService,
+            EmailService emailService,
             ILogger<ConversationManager> logger)
         {
             _conversationService = conversationService;
             _aiService = aiService;
             _orderService = orderService;
             _telegramService = telegramService;
+            _emailService = emailService;
             _logger = logger;
         }
 
@@ -85,6 +88,7 @@ namespace ApiLetraViva.Services
                 (ConversationState.DiscoveringOccasion, "choosing_package") => ConversationState.ChoosingPackage,
                 (ConversationState.DiscoveringOccasion, "discovering_occasion") => ConversationState.DiscoveringOccasion,
                 (ConversationState.ChoosingPackage, "collecting_details") => ConversationState.CollectingDetails,
+                (ConversationState.CollectingDetails, "collecting_email") => ConversationState.CollectingDetails,
                 (ConversationState.CollectingDetails, "order_ready") => ConversationState.AwaitingPayment,
                 _ => current
             };
@@ -97,7 +101,7 @@ namespace ApiLetraViva.Services
         {
             try
             {
-                string? occasion = null, package = null, genre = null, details = null, recipient = null;
+                string? occasion = null, package = null, genre = null, details = null, recipient = null, email = null;
 
                 if (aiResponse.Data.HasValue)
                 {
@@ -107,12 +111,20 @@ namespace ApiLetraViva.Services
                     genre     = GetString(data, "genre");
                     details   = GetString(data, "details");
                     recipient = GetString(data, "recipient");
+                    email     = GetString(data, "email");
                 }
 
                 if (string.IsNullOrWhiteSpace(package))
                 {
                     _logger.LogWarning("order_ready sin paquete definido | ConversationId: {Id}", conversation.Id);
                     return;
+                }
+
+                // Guardar el email del cliente si fue proporcionado
+                if (!string.IsNullOrWhiteSpace(email))
+                {
+                    await _conversationService.UpdateCustomerEmail(customer.Id, email);
+                    customer.Email = email; // Actualizar en memoria para el envío de correo
                 }
 
                 var fullDetails = string.IsNullOrWhiteSpace(recipient)
@@ -126,6 +138,10 @@ namespace ApiLetraViva.Services
                 var summary = BuildOrderSummary(order, recipient, genre, details, occasion);
                 await _conversationService.SaveMessage(conversation.Id, "assistant", summary);
                 await _telegramService.SendMessage(chatId, summary);
+
+                // Enviar correos al cliente y al proveedor
+                await _emailService.SendOrderConfirmationToCustomerAsync(order, customer);
+                await _emailService.SendOrderNotificationToProviderAsync(order, customer);
 
                 _logger.LogInformation(
                     "Pedido creado | OrderNumber: {OrderNumber} | Package: {Package} | Total: {Total}",

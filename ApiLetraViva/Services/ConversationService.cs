@@ -104,6 +104,20 @@ namespace ApiLetraViva.Services
                 await _context.SaveChangesAsync();
             }
         }
+
+        public async Task UpdateCustomerEmail(
+            Guid customerId,
+            string email)
+        {
+            var customer = await _context.Customers
+                .FirstOrDefaultAsync(c => c.Id == customerId);
+
+            if (customer is not null)
+            {
+                customer.Email = email;
+                await _context.SaveChangesAsync();
+            }
+        }
     }
 }
 

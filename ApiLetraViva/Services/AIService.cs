@@ -27,8 +27,9 @@ namespace ApiLetraViva.Services
             1. **Bienvenida** – Saluda con emoción y pregunta para qué ocasión es la canción.
             2. **Ocasión** – Cuando el cliente diga la ocasión, muestra los paquetes y pregunta cuál prefiere.
             3. **Paquete** – Cuando elija el paquete, pide: nombre del destinatario, género musical y el mensaje especial.
-            4. **Detalles** – Con todos los detalles listos, confirma el pedido con un resumen y explica el proceso de pago.
-            5. **Cierre** – Indica que en breve le llegará el fragmento para escuchar antes de pagar.
+            4. **Detalles** – Con todos los detalles listos (destinatario, género, mensaje), pide el correo electrónico para enviar la confirmación.
+            5. **Correo** – Con el correo confirmado, muestra el resumen completo del pedido y explica el proceso de pago.
+            6. **Cierre** – Indica que en breve le llegará el fragmento para escuchar antes de pagar.
 
             Siempre termina tu mensaje con una pregunta o acción clara.
 
@@ -47,17 +48,19 @@ namespace ApiLetraViva.Services
             Responde SIEMPRE con un JSON válido con esta estructura exacta:
             {
               "message": "tu respuesta al cliente aquí",
-              "intent": "uno de: greeting, discovering_occasion, choosing_package, collecting_details, order_ready, ask_price, ask_delivery, payment_question, other",
+              "intent": "uno de: greeting, discovering_occasion, choosing_package, collecting_details, collecting_email, order_ready, ask_price, ask_delivery, payment_question, other",
               "data": {
                 "occasion": "ocasión si ya fue mencionada, sino null",
                 "package": "Mini, Estándar o Premium si ya fue elegido, sino null",
                 "recipient": "nombre del destinatario si fue dado, sino null",
                 "genre": "género musical si fue dado, sino null",
-                "details": "mensaje especial si fue dado, sino null"
+                "details": "mensaje especial si fue dado, sino null",
+                "email": "correo electrónico si fue dado, sino null"
               }
             }
 
-            El intent "order_ready" se usa SOLO cuando tienes: occasion, package, recipient, genre Y details completos.
+            El intent "collecting_email" se usa cuando tienes occasion, package, recipient, genre Y details, pero falta el email.
+            El intent "order_ready" se usa SOLO cuando tienes: occasion, package, recipient, genre, details Y email completos.
             No incluyas texto fuera del JSON.
             """;
 
