@@ -44,6 +44,14 @@ namespace ApiLetraViva.Services
                 "Procesando mensaje | ChatId: {ChatId} | State: {State} | Message: {Message}",
                 chatId, conversation.State, userMessage);
 
+            // Si el cliente quiere hacer un nuevo pedido, reiniciar la conversación
+            if (conversation.State == ConversationState.AwaitingPayment && EsNuevoPedido(userMessage))
+            {
+                await _conversationService.UpdateConversationState(conversation.Id, ConversationState.Idle);
+                conversation.State = ConversationState.Idle;
+                _logger.LogInformation("Conversación reiniciada para nuevo pedido | ChatId: {ChatId}", chatId);
+            }
+
             // Guardar mensaje del usuario
             await _conversationService.SaveMessage(conversation.Id, "user", userMessage);
 
@@ -53,15 +61,23 @@ namespace ApiLetraViva.Services
             // Obtener respuesta estructurada de la IA
             var aiResponse = await _aiService.GetStructuredResponse(userMessage, history, conversation.State);
 
-            // Aplicar transición de estado según intent
-            var newState = ApplyStateTransition(conversation.State, aiResponse.Intent);
+            _logger.LogInformation(
+                "Respuesta IA | Intent: {Intent} | State: {State}",
+                aiResponse.Intent, conversation.State);
 
-            // Si el pedido está listo, crearlo en la BD
+            // Si el pedido está listo, crearlo en la BD y enviar resumen
+            // (solo si no estamos ya en AwaitingPayment para evitar duplicados)
+            var orderCreated = false;
             if (aiResponse.Intent == "order_ready" && conversation.State != ConversationState.AwaitingPayment)
             {
                 await TryCreateOrderAsync(customer, conversation, aiResponse, chatId);
-                newState = ConversationState.AwaitingPayment;
+                orderCreated = true;
             }
+
+            // Aplicar transición de estado
+            var newState = orderCreated
+                ? ConversationState.AwaitingPayment
+                : ApplyStateTransition(conversation.State, aiResponse.Intent);
 
             // Actualizar estado si cambió
             if (newState != conversation.State)
@@ -72,13 +88,25 @@ namespace ApiLetraViva.Services
                     chatId, conversation.State, newState);
             }
 
-            // Guardar respuesta del asistente y enviar a Telegram
-            // (si fue order_ready, el resumen ya fue enviado dentro de TryCreateOrderAsync)
-            if (aiResponse.Intent != "order_ready" || conversation.State == ConversationState.AwaitingPayment)
+            // Enviar respuesta normal de la IA solo si NO se creó un pedido
+            // (cuando se crea el pedido, TryCreateOrderAsync ya envía el resumen)
+            if (!orderCreated)
             {
                 await _conversationService.SaveMessage(conversation.Id, "assistant", aiResponse.Message);
                 await _telegramService.SendMessage(chatId, aiResponse.Message);
             }
+        }
+
+        private static bool EsNuevoPedido(string mensaje)
+        {
+            var lower = mensaje.ToLowerInvariant();
+            return lower.Contains("nuevo pedido") ||
+                   lower.Contains("nueva canción") ||
+                   lower.Contains("nueva cancion") ||
+                   lower.Contains("quiero pedir") ||
+                   lower.Contains("quiero ordenar") ||
+                   lower.Contains("hacer otro") ||
+                   lower.Contains("otro pedido");
         }
 
         private static ConversationState ApplyStateTransition(ConversationState current, string intent) =>
@@ -114,6 +142,10 @@ namespace ApiLetraViva.Services
                     email     = GetString(data, "email");
                 }
 
+                _logger.LogInformation(
+                    "Datos del pedido | Package: {Package} | Occasion: {Occasion} | Recipient: {Recipient} | Genre: {Genre} | Email: {Email}",
+                    package, occasion, recipient, genre, email);
+
                 if (string.IsNullOrWhiteSpace(package))
                 {
                     _logger.LogWarning("order_ready sin paquete definido | ConversationId: {Id}", conversation.Id);
@@ -124,7 +156,7 @@ namespace ApiLetraViva.Services
                 if (!string.IsNullOrWhiteSpace(email))
                 {
                     await _conversationService.UpdateCustomerEmail(customer.Id, email);
-                    customer.Email = email; // Actualizar en memoria para el envío de correo
+                    customer.Email = email;
                 }
 
                 var fullDetails = string.IsNullOrWhiteSpace(recipient)
@@ -134,6 +166,10 @@ namespace ApiLetraViva.Services
                 var order = await _orderService.CreateOrderAsync(
                     customer.Id, package, occasion, genre, fullDetails);
 
+                _logger.LogInformation(
+                    "✅ Pedido creado en BD | OrderNumber: {OrderNumber} | Package: {Package} | Total: {Total}",
+                    order.OrderNumber, order.Package, order.Total);
+
                 // Enviar resumen del pedido con número de orden
                 var summary = BuildOrderSummary(order, recipient, genre, details, occasion);
                 await _conversationService.SaveMessage(conversation.Id, "assistant", summary);
@@ -142,14 +178,10 @@ namespace ApiLetraViva.Services
                 // Enviar correos al cliente y al proveedor
                 await _emailService.SendOrderConfirmationToCustomerAsync(order, customer);
                 await _emailService.SendOrderNotificationToProviderAsync(order, customer);
-
-                _logger.LogInformation(
-                    "Pedido creado | OrderNumber: {OrderNumber} | Package: {Package} | Total: {Total}",
-                    order.OrderNumber, order.Package, order.Total);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error creando pedido | CustomerId: {CustomerId}", customer.Id);
+                _logger.LogError(ex, "❌ Error creando pedido | CustomerId: {CustomerId}", customer.Id);
             }
         }
 
