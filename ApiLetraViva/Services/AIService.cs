@@ -1,4 +1,6 @@
-﻿using ApiLetraViva.Enums;
+﻿using System.Text.Json;
+using ApiLetraViva.Dtos;
+using ApiLetraViva.Enums;
 using Mscc.GenerativeAI;
 using ConversationMessage = ApiLetraViva.Models.Message;
 
@@ -19,39 +21,44 @@ namespace ApiLetraViva.Services
             - Transmite que detrás de cada canción hay una historia especial.
 
             ## Tu misión principal
-            Guiar ACTIVAMENTE a cada cliente paso a paso hasta completar su pedido. No esperes a que el cliente sepa qué hacer — tú llevas la conversación hacia la venta con calidez.
+            Guiar ACTIVAMENTE a cada cliente paso a paso hasta completar su pedido.
 
-            ## Flujo obligatorio del pedido (sigue este orden siempre)
+            ## Flujo obligatorio del pedido
             1. **Bienvenida** – Saluda con emoción y pregunta para qué ocasión es la canción.
-            2. **Ocasión** – Una vez que el cliente diga la ocasión, muestra los paquetes con sus precios y pregunta cuál prefiere.
-            3. **Paquete** – Cuando elija el paquete, pide los detalles: nombre del destinatario, género musical y el mensaje o historia especial que quiere en la canción.
-            4. **Detalles** – Con los detalles listos, confirma el pedido con un resumen y explica cómo es el proceso de pago (contra entrega digital: primero escucha 40-50 seg, luego paga).
+            2. **Ocasión** – Cuando el cliente diga la ocasión, muestra los paquetes y pregunta cuál prefiere.
+            3. **Paquete** – Cuando elija el paquete, pide: nombre del destinatario, género musical y el mensaje especial.
+            4. **Detalles** – Con todos los detalles listos, confirma el pedido con un resumen y explica el proceso de pago.
             5. **Cierre** – Indica que en breve le llegará el fragmento para escuchar antes de pagar.
 
-            IMPORTANTE: Siempre termina tu mensaje con una pregunta o acción clara para que el cliente sepa exactamente qué hacer a continuación.
+            Siempre termina tu mensaje con una pregunta o acción clara.
 
             ## Paquetes disponibles
             - 🎵 **Mini** – $59.900 COP · 2:00-2:30 min · MP3
             - ⭐ **Estándar** – $109.900 COP · 3:30 min · MP3 + Tarjeta Digital + Foto portada
             - 🌟 **Premium** – $199.900 COP · 3:30 min · MP3 + Tarjeta Digital + Video Lyric
-            - Empresas: cotización personalizada
 
             ## Políticas clave
-            - Entrega: 24 a 48 horas. Express disponible en 4 horas.
+            - Entrega: 24 a 48 horas. Express en 4 horas.
             - Revisiones: hasta 2 sin costo.
             - Contra entrega digital: primero escuchas 40-50 seg, luego pagas.
             - Pagos: PSE, Nequi, Daviplata, tarjetas, efectivo, Mercado Pago.
-            - Géneros: pop, rock, balada, reggaeton, cumbia, vallenato y más.
-            - Disponible en toda Latinoamérica.
 
-            ## Reglas importantes
-            - Siempre avanza hacia el siguiente paso del flujo — no te quedes respondiendo sin guiar.
-            - Si el cliente pregunta algo puntual (precio, tiempo), respóndelo brevemente y retoma el flujo.
-            - NO incluyas el WhatsApp en cada mensaje.
-            - Solo comparte el WhatsApp (https://wa.me/573243798334) si el cliente pide hablar con una persona o tiene un problema complejo.
-            - No prometer tiempos menores a los establecidos.
-            - No dar descuentos adicionales.
-            - No hablar de temas ajenos a Letra Viva.
+            ## FORMATO DE RESPUESTA (OBLIGATORIO)
+            Responde SIEMPRE con un JSON válido con esta estructura exacta:
+            {
+              "message": "tu respuesta al cliente aquí",
+              "intent": "uno de: greeting, discovering_occasion, choosing_package, collecting_details, order_ready, ask_price, ask_delivery, payment_question, other",
+              "data": {
+                "occasion": "ocasión si ya fue mencionada, sino null",
+                "package": "Mini, Estándar o Premium si ya fue elegido, sino null",
+                "recipient": "nombre del destinatario si fue dado, sino null",
+                "genre": "género musical si fue dado, sino null",
+                "details": "mensaje especial si fue dado, sino null"
+              }
+            }
+
+            El intent "order_ready" se usa SOLO cuando tienes: occasion, package, recipient, genre Y details completos.
+            No incluyas texto fuera del JSON.
             """;
 
         public AIService(IConfiguration configuration, ILogger<AIService> logger)
@@ -60,13 +67,7 @@ namespace ApiLetraViva.Services
             _logger = logger;
         }
 
-        // Sobrecarga sin historial — compatibilidad con código existente
-        public async Task<string> GetResponse(string userMessage)
-        {
-            return await GetResponse(userMessage, [], ConversationState.Idle);
-        }
-
-        public async Task<string> GetResponse(
+        public async Task<AIResponse> GetStructuredResponse(
             string userMessage,
             IReadOnlyList<ConversationMessage> history,
             ConversationState currentState)
@@ -79,7 +80,7 @@ namespace ApiLetraViva.Services
                 if (string.IsNullOrWhiteSpace(apiKey))
                 {
                     _logger.LogError("GEMINI_API_KEY no está configurada");
-                    return "Lo siento, en este momento no puedo responder. Por favor intenta más tarde 🙏";
+                    return Fallback("Lo siento, en este momento no puedo responder. Por favor intenta más tarde 🙏");
                 }
 
                 var googleAI = new GoogleAI(apiKey);
@@ -88,19 +89,59 @@ namespace ApiLetraViva.Services
                     systemInstruction: new Content(SystemPrompt)
                 );
 
-                // Construir el prompt incluyendo el historial como contexto
                 var fullPrompt = BuildPromptWithHistory(userMessage, history, currentState);
-
                 var response = await model.GenerateContent(fullPrompt);
+                var rawText = response.Text ?? string.Empty;
 
-                return response.Text ?? "No pude generar una respuesta. ¿Puedes repetir tu mensaje? 😊";
+                return ParseResponse(rawText);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error al llamar a la API de Gemini");
-                return "Ups, tuve un problema técnico 😅 ¿Puedes intentarlo de nuevo en un momento?";
+                return Fallback("Ups, tuve un problema técnico 😅 ¿Puedes intentarlo de nuevo en un momento?");
             }
         }
+
+        private AIResponse ParseResponse(string rawText)
+        {
+            try
+            {
+                // Limpiar posibles bloques de código markdown
+                var json = rawText.Trim();
+                if (json.StartsWith("```"))
+                {
+                    var start = json.IndexOf('{');
+                    var end = json.LastIndexOf('}');
+                    if (start >= 0 && end > start)
+                        json = json[start..(end + 1)];
+                }
+
+                var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                var message = root.TryGetProperty("message", out var msgProp)
+                    ? msgProp.GetString() ?? rawText
+                    : rawText;
+
+                var intent = root.TryGetProperty("intent", out var intentProp)
+                    ? intentProp.GetString() ?? "other"
+                    : "other";
+
+                var data = root.TryGetProperty("data", out var dataProp)
+                    ? (JsonElement?)dataProp
+                    : null;
+
+                return new AIResponse(message, intent, data);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "No se pudo parsear respuesta JSON de Gemini: {Raw}", rawText);
+                return new AIResponse(rawText, "other", null);
+            }
+        }
+
+        private static AIResponse Fallback(string message) =>
+            new(message, "other", null);
 
         private static string BuildPromptWithHistory(
             string userMessage,
@@ -110,11 +151,11 @@ namespace ApiLetraViva.Services
             var sb = new System.Text.StringBuilder();
 
             if (currentState != ConversationState.Idle)
-                sb.AppendLine($"[Estado actual de la conversación: {GetStateDescription(currentState)}]\n");
+                sb.AppendLine($"[Estado actual: {GetStateDescription(currentState)}]\n");
 
             if (history.Count > 0)
             {
-                sb.AppendLine("Historial de la conversación:");
+                sb.AppendLine("Historial:");
                 foreach (var msg in history)
                 {
                     var label = msg.Role == "user" ? "Cliente" : "Celeste";
@@ -130,13 +171,13 @@ namespace ApiLetraViva.Services
         private static string GetStateDescription(ConversationState state) => state switch
         {
             ConversationState.Idle => "inicio",
-            ConversationState.DiscoveringOccasion => "preguntando por la ocasión de la canción",
-            ConversationState.ChoosingPackage => "el cliente está eligiendo el paquete",
-            ConversationState.CollectingDetails => "recolectando detalles (destinatario, género, mensaje)",
-            ConversationState.AwaitingPayment => "esperando que el cliente realice el pago",
-            ConversationState.Paid => "pago confirmado, canción en producción",
-            ConversationState.InProduction => "canción en producción",
-            ConversationState.Delivered => "canción entregada",
+            ConversationState.DiscoveringOccasion => "preguntando por la ocasión",
+            ConversationState.ChoosingPackage => "eligiendo paquete",
+            ConversationState.CollectingDetails => "recolectando detalles",
+            ConversationState.AwaitingPayment => "esperando pago",
+            ConversationState.Paid => "pago confirmado",
+            ConversationState.InProduction => "en producción",
+            ConversationState.Delivered => "entregado",
             _ => state.ToString()
         };
     }
