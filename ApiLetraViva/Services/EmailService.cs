@@ -5,24 +5,53 @@ namespace ApiLetraViva.Services
 {
     public class EmailService
     {
-        private readonly IResend _resend;
-        private readonly string _providerEmail;
+        private readonly IResend? _resend;
+        private readonly string? _providerEmail;
         private readonly ILogger<EmailService> _logger;
+        private readonly bool _isConfigured;
 
         public EmailService(IConfiguration configuration, ILogger<EmailService> logger)
         {
-            var apiKey = configuration["RESEND_API_KEY"] 
-                ?? throw new InvalidOperationException("RESEND_API_KEY no configurada");
-            
-            _providerEmail = configuration["PROVIDER_EMAIL"] 
-                ?? throw new InvalidOperationException("PROVIDER_EMAIL no configurado");
-
-            _resend = ResendClient.Create(apiKey);
             _logger = logger;
+
+            var apiKey = configuration["RESEND_API_KEY"];
+            _providerEmail = configuration["PROVIDER_EMAIL"];
+
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                _logger.LogWarning("RESEND_API_KEY no configurada. El envío de correos estará deshabilitado.");
+                _isConfigured = false;
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(_providerEmail))
+            {
+                _logger.LogWarning("PROVIDER_EMAIL no configurado. El envío de correos al proveedor estará deshabilitado.");
+            }
+
+            try
+            {
+                _resend = ResendClient.Create(apiKey);
+                _isConfigured = true;
+                _logger.LogInformation("EmailService configurado correctamente.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error inicializando ResendClient. El envío de correos estará deshabilitado.");
+                _isConfigured = false;
+            }
         }
 
         public async Task SendOrderConfirmationToCustomerAsync(Order order, Customer customer)
         {
+            if (!_isConfigured || _resend == null)
+            {
+                _logger.LogWarning(
+                    "EmailService no configurado. No se puede enviar correo al cliente | OrderNumber: {OrderNumber}",
+                    order.OrderNumber);
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(customer.Email))
             {
                 _logger.LogWarning(
@@ -33,6 +62,10 @@ namespace ApiLetraViva.Services
 
             try
             {
+                _logger.LogInformation(
+                    "Intentando enviar correo al cliente | OrderNumber: {OrderNumber} | Email: {Email}",
+                    order.OrderNumber, customer.Email);
+
                 var total = order.Total.ToString("N0");
                 var htmlBody = $"""
                     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -72,21 +105,41 @@ namespace ApiLetraViva.Services
                 var response = await _resend.EmailSendAsync(message);
 
                 _logger.LogInformation(
-                    "Correo enviado al cliente | OrderNumber: {OrderNumber} | Email: {Email}",
+                    "✅ Correo enviado exitosamente al cliente | OrderNumber: {OrderNumber} | Email: {Email}",
                     order.OrderNumber, customer.Email);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, 
-                    "Error enviando correo al cliente | OrderNumber: {OrderNumber} | Email: {Email}",
+                    "❌ Error enviando correo al cliente | OrderNumber: {OrderNumber} | Email: {Email}",
                     order.OrderNumber, customer.Email);
             }
         }
 
         public async Task SendOrderNotificationToProviderAsync(Order order, Customer customer)
         {
+            if (!_isConfigured || _resend == null)
+            {
+                _logger.LogWarning(
+                    "EmailService no configurado. No se puede enviar correo al proveedor | OrderNumber: {OrderNumber}",
+                    order.OrderNumber);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(_providerEmail))
+            {
+                _logger.LogWarning(
+                    "PROVIDER_EMAIL no configurado. No se puede enviar correo al proveedor | OrderNumber: {OrderNumber}",
+                    order.OrderNumber);
+                return;
+            }
+
             try
             {
+                _logger.LogInformation(
+                    "Intentando enviar correo al proveedor | OrderNumber: {OrderNumber} | ProviderEmail: {Email}",
+                    order.OrderNumber, _providerEmail);
+
                 var total = order.Total.ToString("N0");
                 var htmlBody = $"""
                     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -123,13 +176,13 @@ namespace ApiLetraViva.Services
                 var response = await _resend.EmailSendAsync(message);
 
                 _logger.LogInformation(
-                    "Correo enviado al proveedor | OrderNumber: {OrderNumber}",
+                    "✅ Correo enviado exitosamente al proveedor | OrderNumber: {OrderNumber}",
                     order.OrderNumber);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, 
-                    "Error enviando correo al proveedor | OrderNumber: {OrderNumber}",
+                    "❌ Error enviando correo al proveedor | OrderNumber: {OrderNumber}",
                     order.OrderNumber);
             }
         }
