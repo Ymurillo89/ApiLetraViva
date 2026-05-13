@@ -37,9 +37,16 @@ namespace ApiLetraViva.Services
                 throw new ArgumentException(
                     $"Paquete '{package}' no válido. Opciones: {string.Join(", ", PackagePrices.Keys)}");
 
+            // Generar número de orden legible: LV-YYYYMMDD-XXXX
+            var today = DateTime.UtcNow;
+            var countToday = await _context.Orders
+                .CountAsync(o => o.CreatedAt.Date == today.Date);
+            var orderNumber = $"LV-{today:yyyyMMdd}-{(countToday + 1):D4}";
+
             var order = new Order
             {
                 Id = Guid.NewGuid(),
+                OrderNumber = orderNumber,
                 CustomerId = customerId,
                 Package = normalizedPackage,
                 Occasion = occasion,
@@ -48,15 +55,15 @@ namespace ApiLetraViva.Services
                 Total = PackagePrices[normalizedPackage],
                 Status = "Pending",
                 PaymentStatus = "Pending",
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = today
             };
 
             _context.Orders.Add(order);
             await _context.SaveChangesAsync();
 
             _logger.LogInformation(
-                "Pedido creado | OrderId: {OrderId} | CustomerId: {CustomerId} | Package: {Package} | Total: {Total}",
-                order.Id, customerId, normalizedPackage, order.Total);
+                "Pedido creado | OrderNumber: {OrderNumber} | CustomerId: {CustomerId} | Package: {Package} | Total: {Total}",
+                orderNumber, customerId, normalizedPackage, order.Total);
 
             return order;
         }

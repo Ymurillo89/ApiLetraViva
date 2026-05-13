@@ -56,7 +56,7 @@ namespace ApiLetraViva.Services
             // Si el pedido está listo, crearlo en la BD
             if (aiResponse.Intent == "order_ready" && conversation.State != ConversationState.AwaitingPayment)
             {
-                await TryCreateOrderAsync(customer, conversation, aiResponse);
+                await TryCreateOrderAsync(customer, conversation, aiResponse, chatId);
                 newState = ConversationState.AwaitingPayment;
             }
 
@@ -69,11 +69,13 @@ namespace ApiLetraViva.Services
                     chatId, conversation.State, newState);
             }
 
-            // Guardar respuesta del asistente
-            await _conversationService.SaveMessage(conversation.Id, "assistant", aiResponse.Message);
-
-            // Enviar respuesta a Telegram
-            await _telegramService.SendMessage(chatId, aiResponse.Message);
+            // Guardar respuesta del asistente y enviar a Telegram
+            // (si fue order_ready, el resumen ya fue enviado dentro de TryCreateOrderAsync)
+            if (aiResponse.Intent != "order_ready" || conversation.State == ConversationState.AwaitingPayment)
+            {
+                await _conversationService.SaveMessage(conversation.Id, "assistant", aiResponse.Message);
+                await _telegramService.SendMessage(chatId, aiResponse.Message);
+            }
         }
 
         private static ConversationState ApplyStateTransition(ConversationState current, string intent) =>
@@ -90,7 +92,8 @@ namespace ApiLetraViva.Services
         private async Task TryCreateOrderAsync(
             Customer customer,
             Conversation conversation,
-            ApiLetraViva.Dtos.AIResponse aiResponse)
+            ApiLetraViva.Dtos.AIResponse aiResponse,
+            long chatId)
         {
             try
             {
@@ -112,7 +115,6 @@ namespace ApiLetraViva.Services
                     return;
                 }
 
-                // Combinar destinatario y detalles en el campo Details
                 var fullDetails = string.IsNullOrWhiteSpace(recipient)
                     ? details
                     : $"Destinatario: {recipient}. {details}";
@@ -120,14 +122,45 @@ namespace ApiLetraViva.Services
                 var order = await _orderService.CreateOrderAsync(
                     customer.Id, package, occasion, genre, fullDetails);
 
+                // Enviar resumen del pedido con número de orden
+                var summary = BuildOrderSummary(order, recipient, genre, details, occasion);
+                await _conversationService.SaveMessage(conversation.Id, "assistant", summary);
+                await _telegramService.SendMessage(chatId, summary);
+
                 _logger.LogInformation(
-                    "Pedido creado exitosamente | OrderId: {OrderId} | Package: {Package} | Total: {Total}",
-                    order.Id, order.Package, order.Total);
+                    "Pedido creado | OrderNumber: {OrderNumber} | Package: {Package} | Total: {Total}",
+                    order.OrderNumber, order.Package, order.Total);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error creando pedido | CustomerId: {CustomerId}", customer.Id);
             }
+        }
+
+        private static string BuildOrderSummary(
+            Order order,
+            string? recipient,
+            string? genre,
+            string? details,
+            string? occasion)
+        {
+            var total = order.Total.ToString("N0");
+            return $"""
+                ✅ *¡Pedido registrado con éxito!*
+
+                📋 *Resumen de tu pedido:*
+                • 🔢 N° de orden: `{order.OrderNumber}`
+                • 🎵 Paquete: {order.Package}
+                • 💰 Total: ${total} COP
+                • 🎉 Ocasión: {order.Occasion ?? "—"}
+                • 🎤 Destinatario: {recipient ?? "—"}
+                • 🎸 Género: {genre ?? "—"}
+                • 💌 Mensaje: {details ?? "—"}
+
+                Guarda tu número de orden *{order.OrderNumber}* para consultar el estado de tu canción 🎶
+
+                En breve recibirás un fragmento de 40-50 seg para escuchar antes de pagar. ¡Gracias por confiar en Letra Viva! 💛
+                """;
         }
 
         private static string? GetString(JsonElement element, string property)
